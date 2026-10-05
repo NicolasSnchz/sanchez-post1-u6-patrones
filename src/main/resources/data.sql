@@ -1,9 +1,10 @@
-INSERT INTO clientes (id, nombre, tipo_cliente) VALUES
-    (1, 'Cliente VIP', 'VIP'),
-    (2, 'Cliente Frecuente', 'FRECUENTE'),
-    (3, 'Cliente Moroso', 'MOROSO'),
-    (4, 'Cliente Estandar A', 'ESTANDAR'),
-    (5, 'Cliente Estandar B', 'ESTANDAR');
+-- El cliente 4 es corporativo: tiene NIT registrado
+INSERT INTO clientes (id, nombre, tipo_cliente, nit) VALUES
+    (1, 'Cliente VIP', 'VIP', NULL),
+    (2, 'Cliente Frecuente', 'FRECUENTE', NULL),
+    (3, 'Cliente Moroso', 'MOROSO', NULL),
+    (4, 'Cliente Estandar A', 'ESTANDAR', '900123456-1'),
+    (5, 'Cliente Estandar B', 'ESTANDAR', NULL);
 
 INSERT INTO productos (id, nombre, precio) VALUES
     (1, 'Teclado', 100000),

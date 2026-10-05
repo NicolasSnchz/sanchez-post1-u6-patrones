@@ -5,6 +5,9 @@ import com.tienda.pedidos.dto.ItemPedido;
 import com.tienda.pedidos.dto.PedidoRequest;
 import com.tienda.pedidos.dto.ResultadoPedido;
 import com.tienda.pedidos.validacion.ContextoPedido;
+import com.tienda.pedidos.validacion.PromocionBlackFriday;
+import com.tienda.pedidos.validacion.PromocionCorporativo;
+import com.tienda.pedidos.validacion.PromocionVolumen;
 import com.tienda.pedidos.validacion.ValidadorCliente;
 import com.tienda.pedidos.validacion.ValidadorPedido;
 import com.tienda.pedidos.validacion.ValidadorStock;
@@ -12,8 +15,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-// Orquestador delgado: coordina validacion, descuento, persistencia y notificacion
-// sin conocer los detalles internos de cada capa
+// GestorPedidos ahora encadena 5 eslabones (2 de validacion real + 3 de "promocion")
+// y combina el descuento de Strategy con el descuentoCampana escrito por la cadena
 @Service
 public class GestorPedidos {
     private static final Logger log = LoggerFactory.getLogger(GestorPedidos.class);
@@ -25,10 +28,12 @@ public class GestorPedidos {
     private final NotificacionPedidoService notificacion;
 
     public GestorPedidos(ValidadorStock stock, ValidadorCliente cliente,
-                         SelectorEstrategiaDescuento selector, PedidoRepository repository,
-                         NotificacionPedidoService notificacion) {
+                         PromocionBlackFriday blackFriday, PromocionCorporativo corporativo,
+                         PromocionVolumen volumen, SelectorEstrategiaDescuento selector,
+                         PedidoRepository repository, NotificacionPedidoService notificacion) {
         this.primerValidador = stock;
-        stock.encadenar(cliente);
+        stock.encadenar(cliente)
+            .encadenar(blackFriday).encadenar(corporativo).encadenar(volumen);
         this.selector = selector;
         this.repository = repository;
         this.notificacion = notificacion;
@@ -46,7 +51,8 @@ public class GestorPedidos {
         double subtotal = calcularSubtotal(request);
         contexto.setSubtotal(subtotal);
 
-        double descuento = selector.seleccionar(contexto.getTipoCliente()).calcular(contexto);
+        double descuentoTipoCliente = selector.seleccionar(contexto.getTipoCliente()).calcular(contexto);
+        double descuento = Math.max(descuentoTipoCliente, contexto.getDescuentoCampana());
         double impuesto = (subtotal - subtotal * descuento) * TASA_IMPUESTO;
         double total = subtotal - (subtotal * descuento) + impuesto;
 
