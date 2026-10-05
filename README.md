@@ -99,6 +99,38 @@ contra el código original y no se tocaron al refactorizar.
 | 6 | Cliente FRECUENTE con 5 pedidos previos, producto 2 x 4 (4%) | Confirmado, total 228.480 | Igual |
 | 7 | Pedido sin ítems | Rechazado: `El pedido no contiene items` | Igual |
 
+### Parte 2: crecimiento del proyecto
+
+**Antipatrón identificado:** Golden Hammer.
+
+Los enlaces apuntan al commit donde se agregaron las tres campañas como eslabones de la cadena.
+
+Para las campañas BLACK_FRIDAY (25%), CORPORATIVO (10% con NIT) y VOLUMEN (12% con más de 20
+unidades) se volvió a usar Chain of Responsibility porque "ya funcionó" en la Parte 1, sin revisar
+si el problema nuevo tenía forma de cadena. La evidencia:
+
+- **No hay dependencia de orden.** `GestorPedidos` ([líneas 35-36](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/service/GestorPedidos.java#L35-L36)) encadena
+  stock, cliente, blackFriday, corporativo y volumen, pero los tres últimos dan el mismo resultado
+  en cualquier orden, porque `aplicarDescuentoCampana()` ([líneas 27-29](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/validacion/ContextoPedido.java#L27-L29)) solo
+  se queda con el valor mayor. Justo el orden es lo que sí tienen `ValidadorStock` y
+  `ValidadorCliente`, y lo que justificaba la cadena.
+- **No hay corte anticipado.** Ninguna de las tres clases llama a `rechazar()`:
+  `PromocionBlackFriday` ([líneas 17-23](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/validacion/PromocionBlackFriday.java#L17-L23)), `PromocionCorporativo`
+  ([líneas 16-22](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/validacion/PromocionCorporativo.java#L16-L22)) y `PromocionVolumen` ([líneas 11-17](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/validacion/PromocionVolumen.java#L11-L17))
+  solo escriben `descuentoCampana`. El corte de `ValidadorPedido.validar()` nunca se usa con ellas.
+- **Se rompe el contrato de `ValidadorPedido`.** Esa clase existe para decidir si el pedido sigue o
+  se rechaza, y ahora la heredan tres clases que no validan nada. El mismo comentario de
+  `PromocionBlackFriday` ([líneas 21-22](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/validacion/PromocionBlackFriday.java#L21-L22)) reconoce que el eslabón solo se
+  aprovecha de que la cadena ya existe.
+- **Estado mutable compartido.** Se agregó `descuentoCampana` a `ContextoPedido`
+  ([línea 13](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/validacion/ContextoPedido.java#L13)) para que clases independientes se comuniquen escribiendo el mismo
+  campo, y `GestorPedidos` ([línea 55](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/39ee497e18c8c7c7ea20dc6a74eb9efd75e788cf/src/main/java/com/tienda/pedidos/service/GestorPedidos.java#L55)) lo combina a mano con el Strategy. Si mañana dos campañas
+  tuvieran que sumarse en vez de competir por el máximo, la regla quedaría escondida en un setter
+  del contexto y no en un lugar claro de cálculo.
+- **El descuento quedó partido en dos mecanismos** para un mismo problema: el de tipo de cliente
+  en `EstrategiaDescuento` y el de campañas dentro de la validación, aunque los dos calculan un
+  porcentaje con datos del pedido o del cliente.
+
 ## Cómo ejecutar
 ```
 mvn test
