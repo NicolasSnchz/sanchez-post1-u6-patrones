@@ -49,6 +49,56 @@ porcentajes de descuento, hay que tocar el mismo método de la misma clase.
   [líneas 77-93](https://github.com/NicolasSnchz/sanchez-post1-u6-patrones/blob/c430e85730a04b1d343f35272cf9e27c4b309a68/src/main/java/com/tienda/pedidos/service/GestorPedidos.java#L77-L93) y meter otra rama `else if`, dentro del mismo método que guarda en la base de datos y
   manda correos.
 
+**Patrones aplicados:** Chain of Responsibility para las validaciones y Strategy para el descuento
+por tipo de cliente. `GestorPedidos` quedó dividido en cuatro capas y ahora solo orquesta:
+
+| Capa | Clases |
+|---|---|
+| Validación (Chain of Responsibility) | [`ValidadorPedido`](src/main/java/com/tienda/pedidos/validacion/ValidadorPedido.java), [`ValidadorStock`](src/main/java/com/tienda/pedidos/validacion/ValidadorStock.java), [`ValidadorCliente`](src/main/java/com/tienda/pedidos/validacion/ValidadorCliente.java), [`ContextoPedido`](src/main/java/com/tienda/pedidos/validacion/ContextoPedido.java) |
+| Descuento (Strategy) | [`EstrategiaDescuento`](src/main/java/com/tienda/pedidos/descuento/EstrategiaDescuento.java), [`DescuentoVip`](src/main/java/com/tienda/pedidos/descuento/DescuentoVip.java), [`DescuentoFrecuente`](src/main/java/com/tienda/pedidos/descuento/DescuentoFrecuente.java), [`DescuentoEstandar`](src/main/java/com/tienda/pedidos/descuento/DescuentoEstandar.java), [`SelectorEstrategiaDescuento`](src/main/java/com/tienda/pedidos/descuento/SelectorEstrategiaDescuento.java) |
+| Persistencia | [`PedidoRepository`](src/main/java/com/tienda/pedidos/service/PedidoRepository.java) (`@Repository`) |
+| Notificación | [`NotificacionPedidoService`](src/main/java/com/tienda/pedidos/service/NotificacionPedidoService.java) (`@Service`) |
+
+**Por qué Chain of Responsibility para validar.** Las validaciones tienen un orden real y
+necesitan cortar el flujo: si `ValidadorStock` rechaza el pedido, `ValidadorCliente` ni siquiera
+debe ejecutarse, porque no tiene sentido consultar la mora de un pedido que no se puede despachar.
+En `ValidadorPedido.validar()` el siguiente eslabón solo se llama si el contexto no fue rechazado.
+La alternativa que descarté fue un método `validarTodo()` con una lista de
+`Predicate<ContextoPedido>`, porque evalúa todos los predicados aunque el primero falle y ningún
+validador puede decidir no pasarle el pedido al siguiente.
+
+**Por qué Strategy para el descuento y no un eslabón más.** Las reglas de descuento no dependen de
+un orden ni necesitan cortar nada: siempre aplica exactamente una regla según el tipo de cliente.
+`SelectorEstrategiaDescuento` cambia el `if/else` original por un `Map`, y agregar un tipo de
+cliente nuevo es crear una clase y registrarla sin tocar las que ya existen (abierto/cerrado).
+Meterlo en la cadena habría obligado a inventar un mecanismo para que solo un eslabón fijara el
+descuento.
+
+**Correcciones al código de referencia de la guía.**
+- En la guía, `this.primerValidador = stock.encadenar(cliente)` guarda como primer eslabón lo que
+  retorna `encadenar()`, que es `ValidadorCliente`. Con eso la validación de stock nunca se
+  ejecutaría y el checkpoint "los cinco pedidos producen la misma salida" fallaría en el caso de
+  stock insuficiente. En mi versión el primer eslabón es `ValidadorStock` y `encadenar()` solo se
+  usa para enlazar.
+- La versión de referencia de `ValidadorStock` no revisaba si el pedido venía sin ítems, cosa que
+  el original sí hacía. La dejé dentro de `ValidadorStock` para no cambiar el comportamiento.
+- `calcularSubtotal()` no hace SQL dentro de `GestorPedidos`: el precio se lee con
+  `PedidoRepository.obtenerPrecioUnitario()`, así el orquestador no depende de `JdbcTemplate`.
+
+**Comparación antes y después (Parte 1).** Mismos pedidos, misma salida. Las expectativas de
+[`GestorPedidosTest`](src/test/java/com/tienda/pedidos/GestorPedidosTest.java) se escribieron
+contra el código original y no se tocaron al refactorizar.
+
+| # | Pedido | Original | Refactorizado |
+|---|---|---|---|
+| 1 | Cliente VIP, producto 3 x 10 (stock 5) | Rechazado: `Stock insuficiente: producto 3` | Igual |
+| 2 | Cliente 99 (no existe) | Rechazado: `Cliente no registrado` | Igual |
+| 3 | Cliente MOROSO a las 10:00 | Rechazado: `Cliente con deuda pendiente: $150000.0` | Igual |
+| 4 | Cliente MOROSO a las 21:00, producto 1 x 2 | Confirmado, total 238.000 | Igual |
+| 5 | Cliente VIP, producto 1 x 6 (subtotal 600.000, 10%) | Confirmado, total 642.600 | Igual |
+| 6 | Cliente FRECUENTE con 5 pedidos previos, producto 2 x 4 (4%) | Confirmado, total 228.480 | Igual |
+| 7 | Pedido sin ítems | Rechazado: `El pedido no contiene items` | Igual |
+
 ## Cómo ejecutar
 ```
 mvn test
