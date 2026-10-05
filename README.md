@@ -131,12 +131,96 @@ si el problema nuevo tenía forma de cadena. La evidencia:
   en `EstrategiaDescuento` y el de campañas dentro de la validación, aunque los dos calculan un
   porcentaje con datos del pedido o del cliente.
 
+**Patrón aplicado:** Strategy. Las tres campañas quedaron como
+[`DescuentoBlackFriday`](src/main/java/com/tienda/pedidos/descuento/DescuentoBlackFriday.java), [`DescuentoCorporativo`](src/main/java/com/tienda/pedidos/descuento/DescuentoCorporativo.java)
+y [`DescuentoVolumen`](src/main/java/com/tienda/pedidos/descuento/DescuentoVolumen.java), que implementan `EstrategiaDescuento` igual que
+`DescuentoVip` y `DescuentoFrecuente`. [`CalculadorDescuentoFinal`](src/main/java/com/tienda/pedidos/descuento/CalculadorDescuentoFinal.java)
+combina la estrategia por tipo de cliente (con `SelectorEstrategiaDescuento`) con el mayor descuento
+de campaña, así que la regla de negocio sigue siendo la misma: gana el mayor descuento. La cadena
+volvió a tener solo `ValidadorStock` y `ValidadorCliente`.
+
+**Por qué Strategy y no más eslabones.** Las campañas, igual que los descuentos por tipo de cliente,
+calculan un porcentaje sin depender de un orden y sin necesitar cortar el flujo. Dejarlas en la
+cadena lo descarté porque era justamente la causa del antipatrón. Además, si la regla de combinación
+cambia (sumar en vez de tomar el máximo), ahora se cambia en un solo método de
+`CalculadorDescuentoFinal`.
+
+**Por qué borrar y no comentar.** `PromocionBlackFriday`, `PromocionCorporativo`,
+`PromocionVolumen` y el campo `descuentoCampana` se eliminaron por completo. Si los dejaba
+comentados "por si acaso" se volvía un Lava Flow, porque más adelante nadie se atreve a borrar código
+que no sabe si todavía sirve. Su historia queda en los commits de este repositorio.
+
+**Comparación antes y después (Parte 2).** Versión con los tres eslabones contra la versión con
+Strategy. Las expectativas de [`CampanasDescuentoTest`](src/test/java/com/tienda/pedidos/CampanasDescuentoTest.java)
+y [`CampanaBlackFridayTest`](src/test/java/com/tienda/pedidos/CampanaBlackFridayTest.java) se
+escribieron con la versión de los eslabones y no se cambiaron al corregir.
+
+| # | Pedido | Con eslabones de cadena | Con Strategy |
+|---|---|---|---|
+| 1 | Cliente ESTANDAR con NIT, producto 1 x 2 (subtotal 200.000, 10%) | Total 214.200 | Igual |
+| 2 | Cliente ESTANDAR sin NIT, producto 4 x 25 (25 unidades, 12%) | Total 130.900 | Igual |
+| 3 | Cliente VIP, producto 4 x 25 (VIP 5% contra volumen 12%, gana 12%) | Total 130.900 | Igual |
+| 4 | Black Friday activa, cliente ESTANDAR, producto 1 x 1 (25%) | Total 89.250 | Igual |
+| 5 | Black Friday activa, cliente VIP, producto 3 x 2 (VIP 15% contra 25%, gana 25%) | Total 1.428.000 | Igual |
+
+Los 7 pedidos de la Parte 1 siguen dando la misma salida en todas las versiones.
+
+![Salida de los pedidos de prueba en las cuatro versiones](docs/capturas/equivalencia-versiones.png)
+
+*Salida de los 12 pedidos de prueba ejecutados sobre las cuatro versiones del código (original,
+Parte 1 refactorizada, Parte 2 con eslabones y Parte 2 corregida) con los datos de `data.sql`.*
+
+
+## Estructura del proyecto
+```
+src/main/java/com/tienda/pedidos/
+├── PedidosServiceApplication.java
+├── config/JdbcTemplateConfig.java
+├── dto/          PedidoRequest, ItemPedido, ResultadoPedido
+├── validacion/   ContextoPedido, ValidadorPedido, ValidadorStock, ValidadorCliente
+├── descuento/    EstrategiaDescuento, DescuentoVip, DescuentoFrecuente, DescuentoEstandar,
+│                 SelectorEstrategiaDescuento, DescuentoBlackFriday, DescuentoCorporativo,
+│                 DescuentoVolumen, CalculadorDescuentoFinal
+└── service/      GestorPedidos, PedidoRepository, NotificacionPedidoService,
+                  EmailService, EmailServiceConsola
+src/main/resources/  application.properties, schema.sql, data.sql
+src/test/java/com/tienda/pedidos/  GestorPedidosTest, CampanasDescuentoTest, CampanaBlackFridayTest
+```
+
 ## Cómo ejecutar
+Requisitos: JDK 17 o superior y Maven 3.8 o superior.
 ```
 mvn test
 mvn spring-boot:run
 ```
+`mvn test` corre los 12 pedidos de prueba (7 de la Parte 1 y 5 de la Parte 2) y muestra en consola
+cada resultado y cada correo de confirmación. `mvn spring-boot:run` levanta la aplicación con H2 en
+memoria cargada desde `schema.sql` y `data.sql` (consola H2 en `http://localhost:8080/h2-console`,
+URL JDBC `jdbc:h2:mem:tienda`).
+
+**Notas técnicas**
+- La URL de H2 usa `MODE=LEGACY` para que funcione `CALL IDENTITY()`, que es lo que usa el código
+  para obtener el id del pedido recién insertado. En H2 2.x esa función solo existe en ese modo.
+- [`JdbcTemplateConfig`](src/main/java/com/tienda/pedidos/config/JdbcTemplateConfig.java) registra un
+  `JdbcTemplate` cuyo `queryForObject` devuelve `null` cuando la consulta no encuentra filas. El código
+  de la guía asume eso (por ejemplo `tipoCliente == null` para un cliente que no existe), pero el
+  `JdbcTemplate` normal lanzaría `EmptyResultDataAccessException` y la prueba del cliente inexistente
+  nunca llegaría al rechazo esperado.
+- Las pruebas del cliente moroso fijan la hora con `Mockito.mockStatic(LocalTime.class)` para probar
+  los dos lados del horario de corte (10:00 y 21:00) sin depender de la hora real.
+- Black Friday se activa con `promo.black-friday.activa=true` en `application.properties` (viene en `false`).
 
 ## Herramientas utilizadas
-- Java 17, Spring Boot 3.3, Spring JDBC, Maven, H2 Database
+- Java 17, Spring Boot 3.3, Spring JDBC, Maven, H2 Database, JUnit 5, Mockito
 - VS Code / IntelliJ IDEA, Git, GitHub
+
+## Conclusiones
+Aprendí que un diagnóstico sirve cuando señala las líneas que demuestran el antipatrón y no solo
+cuando lo nombra: contar las seis responsabilidades de `procesarPedido()` y los tres niveles de
+anidamiento de la mora fue lo que me dijo dónde partir la clase. Chain of Responsibility y Strategy
+resolvieron problemas con formas distintas: la cadena se justifica por el orden y el corte de las
+validaciones, mientras que el descuento solo necesita escoger una regla. La Parte 2 me mostró que un
+patrón que funcionó bien se vuelve Golden Hammer cuando se reutiliza sin revisar que el problema nuevo
+tenga la misma forma. Por último, escribir las pruebas antes de refactorizar fue lo que me permitió
+demostrar que el comportamiento no cambió, y borrar el código descartado en vez de comentarlo evitó
+dejar un Lava Flow, porque el historial de Git ya guarda esa referencia.
